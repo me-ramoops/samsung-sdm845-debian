@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * SDM845 Samsung Galaxy S9+ (SM-G9650) (star2qltechn) device tree source
+ *
+ * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+ */
+
+/dts-v1/;
+
+#include "sdm845-samsung-star-common.dtsi"
+
+/ {
+	model = "Samsung Galaxy S9+ SM-G9650";
+	compatible = "samsung,star2qltechn", "qcom,sdm845";
+
+	battery: battery {
+		charge-full-design-microamp-hours = <3500000>;
+	};
+};

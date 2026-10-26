@@ -1,0 +1,140 @@
+#!/bin/busybox sh
+# ==============================================================================
+# Samsung SDM845 Debian Linux switch_root initramfs
+# Supported devices: Galaxy S9 (starqltechn), S9+ (star2qltechn), Note 9 (crownqltechn)
+# ==============================================================================
+
+BB=/bin/busybox
+$BB --install -s /bin 2>/dev/null
+export PATH=/bin:/sbin HOME=/ TERM=linux
+
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sysfs /sys 2>/dev/null
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || mdev -s
+mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+echo 8 > /proc/sys/kernel/printk 2>/dev/null
+
+echo ""
+echo "======================================================================"
+echo "  Samsung SDM845 Debian GNU/Linux (Mainline $(uname -r))"
+echo "  Galaxy S9 | Galaxy S9+ | Galaxy Note 9"
+echo "======================================================================"
+echo ""
+
+# Find a block device by GPT PARTNAME
+find_by_partname() {
+    for u in /sys/class/block/*/uevent; do
+        if grep -qi "^PARTNAME=$1\$" "$u" 2>/dev/null; then
+            echo "/dev/$($BB basename "$($BB dirname "$u")")"; return 0
+        fi
+    done
+    return 1
+}
+
+# Bring up USB NCM/RNDIS Network Gadget for emergency shell / debugging
+setup_gadget() {
+    UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+    [ -n "$UDC" ] || { echo "[initramfs] No USB Device Controller found"; return 1; }
+    
+    mount -t configfs none /sys/kernel/config 2>/dev/null
+    G=/sys/kernel/config/usb_gadget/g1
+    mkdir -p $G/strings/0x409 $G/configs/c.1/strings/0x409 $G/functions/ncm.usb0 2>/dev/null || return 1
+    
+    echo 0x1d6b > $G/idVendor
+    echo 0x0104 > $G/idProduct
+    echo "Samsung SDM845 Linux" > $G/strings/0x409/product
+    echo "Samsung" > $G/strings/0x409/manufacturer
+    echo "0123456789" > $G/strings/0x409/serialnumber
+    echo "ncm" > $G/configs/c.1/strings/0x409/configuration
+    ln -s $G/functions/ncm.usb0 $G/configs/c.1/ 2>/dev/null
+    echo "$UDC" > $G/UDC 2>/dev/null || { echo "[initramfs] UDC bind failed"; return 1; }
+    
+    sleep 1
+    ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null || \
+        { ip link set usb0 up; ip addr add 172.16.42.1/24 dev usb0; } 2>/dev/null
+        
+    mkdir -p /dev/pts
+    mount -t devpts devpts /dev/pts 2>/dev/null
+    telnetd -l /bin/sh -b 172.16.42.1 2>/dev/null && echo "[initramfs] Emergency Telnet shell listening on 172.16.42.1:23"
+}
+
+# Scan for root filesystem
+echo "[initramfs] Scanning for rootfs..."
+ROOT=""
+i=0
+while [ $i -lt 15 ]; do
+    # 1. By filesystem label
+    for dev in /dev/sd* /dev/mmcblk*; do
+        [ -b "$dev" ] || continue
+        L=$($BB blkid "$dev" 2>/dev/null)
+        if echo "$L" | grep -q 'LABEL="debian-root"'; then
+            ROOT="$dev"; break 2
+        fi
+    done
+    
+    # 2. Check userdata partition
+    if [ -z "$ROOT" ]; then
+        ROOT=$(find_by_partname userdata)
+        [ -n "$ROOT" ] && break
+    fi
+    
+    # 3. Check system partition
+    if [ -z "$ROOT" ]; then
+        ROOT=$(find_by_partname system)
+        [ -n "$ROOT" ] && break
+    fi
+
+    # 4. Check MicroSD card
+    if [ -z "$ROOT" ] && [ -b /dev/mmcblk0p1 ]; then
+        ROOT="/dev/mmcblk0p1"
+        break
+    fi
+
+    sleep 1
+    i=$((i+1))
+done
+
+REASON=""
+[ -n "$ROOT" ] || REASON="No valid root partition (debian-root, userdata, or system) found"
+
+mkdir -p /newroot
+if [ -z "$REASON" ]; then
+    echo "[initramfs] Attempting to mount rootfs from $ROOT..."
+    MOUT=$(mount -t ext4 "$ROOT" /newroot 2>&1) || REASON="Failed mounting ext4 from $ROOT: $MOUT"
+fi
+
+if [ -z "$REASON" ] && [ ! -x /newroot/usr/lib/systemd/systemd ]; then
+    REASON="Systemd binary not found in /newroot/usr/lib/systemd/systemd"
+fi
+
+if [ -z "$REASON" ]; then
+    echo "[initramfs] Root filesystem mounted cleanly from $ROOT"
+    echo "[initramfs] Switching root to systemd..."
+    mount -t devtmpfs devtmpfs /newroot/dev 2>/dev/null
+    sleep 1
+    umount /sys/kernel/debug 2>/dev/null
+    umount /proc 2>/dev/null
+    umount /sys 2>/dev/null
+    exec switch_root /newroot /usr/lib/systemd/systemd
+    REASON="switch_root returned unexpectedly"
+fi
+
+# Emergency Lifeline Fallback
+echo ""
+echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+echo "  [ERROR] DEBIAN BOOT FAILED: $REASON"
+echo "  Starting USB network recovery shell..."
+echo "  Connect phone to PC via USB -> Configure PC to 172.16.42.2"
+echo "  Run: telnet 172.16.42.1"
+echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+echo ""
+
+setup_gadget
+
+# Heartbeat loop
+hb=0
+while true; do
+    echo "[recovery-hb $hb uptime $($BB cut -d' ' -f1 /proc/uptime)s] Reason: $REASON"
+    hb=$((hb+1))
+    sleep 15
+done

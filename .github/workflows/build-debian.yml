@@ -1,0 +1,185 @@
+name: Build Debian ARM64 for Samsung SDM845
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update -yqq
+          sudo apt-get install -yqq bc bison ca-certificates ccache clang cpio debootstrap debian-archive-keyring \
+            e2fsprogs flex gcc-aarch64-linux-gnu git gzip kmod libelf-dev libssl-dev llvm lld make proot \
+            qemu-user-static tar zip python3 python3-pip wget curl
+
+      - name: Install mkbootimg
+        run: |
+          sudo pip3 install --break-system-packages mkbootimg
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-sdm845-${{ github.run_id }}
+          restore-keys: ccache-sdm845-
+
+      - name: Fetch and Patch Mainline Kernel
+        run: |
+          git clone --depth 1 --branch 6.17-wip/starqltechn_latest_patches https://gitlab.com/dsankouski/sdm845-linux-next.git linux
+          
+          # Copy our optimized and verified DTS files
+          cp config/dts/sdm845-samsung-star-common.dtsi linux/arch/arm64/boot/dts/qcom/
+          cp config/dts/sdm845-samsung-starqltechn.dts linux/arch/arm64/boot/dts/qcom/
+          cp config/dts/sdm845-samsung-star2qltechn.dts linux/arch/arm64/boot/dts/qcom/
+          cp config/dts/sdm845-samsung-crownqltechn.dts linux/arch/arm64/boot/dts/qcom/
+
+          # Ensure all three DTBs are in Makefile
+          sed -i '/sdm845-samsung-starqltechn.dtb/d' linux/arch/arm64/boot/dts/qcom/Makefile
+          sed -i '/sdm845-samsung-star2qltechn.dtb/d' linux/arch/arm64/boot/dts/qcom/Makefile
+          sed -i '/sdm845-samsung-crownqltechn.dtb/d' linux/arch/arm64/boot/dts/qcom/Makefile
+          
+          sed -i '/sdm845-oneplus-fajita.dtb/a \
+dtb-$(CONFIG_ARCH_QCOM)\t+= sdm845-samsung-starqltechn.dtb\n\
+dtb-$(CONFIG_ARCH_QCOM)\t+= sdm845-samsung-star2qltechn.dtb\n\
+dtb-$(CONFIG_ARCH_QCOM)\t+= sdm845-samsung-crownqltechn.dtb' linux/arch/arm64/boot/dts/qcom/Makefile
+
+      - name: Build Kernel and DTBs
+        run: |
+          export CC="ccache clang"
+          cd linux
+          make ARCH=arm64 LLVM=1 defconfig
+          scripts/kconfig/merge_config.sh -m .config ../config/sdm845_debian.config
+          make ARCH=arm64 LLVM=1 olddefconfig
+          make ARCH=arm64 LLVM=1 -j"$(nproc)" Image dtbs modules
+
+          # Verify generated DTBs
+          test -f arch/arm64/boot/dts/qcom/sdm845-samsung-starqltechn.dtb
+          test -f arch/arm64/boot/dts/qcom/sdm845-samsung-star2qltechn.dtb
+          test -f arch/arm64/boot/dts/qcom/sdm845-samsung-crownqltechn.dtb
+          test -f arch/arm64/boot/Image
+
+          KVER="$(make ARCH=arm64 LLVM=1 -s kernelrelease)"
+          echo "KVER=$KVER" >> "$GITHUB_ENV"
+
+      - name: Build Busybox Initramfs
+        run: |
+          wget -q https://busybox.net/downloads/busybox-1.36.1.tar.bz2
+          tar xf busybox-1.36.1.tar.bz2
+          cd busybox-1.36.1
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+          sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+          sed -i 's/^CONFIG_TC=y$/# CONFIG_TC is not set/' .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" busybox
+          mkdir -p ../initramfs/bin
+          cp busybox ../initramfs/bin/busybox
+          chmod +x ../initramfs/bin/busybox ../initramfs/init
+
+          cd "$GITHUB_WORKSPACE/initramfs"
+          find . -print0 | cpio --null --create --format=newc | gzip -9 > "$GITHUB_WORKSPACE/initramfs.cpio.gz"
+          test -f "$GITHUB_WORKSPACE/initramfs.cpio.gz"
+
+      - name: Package Android Boot Images
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/package/boot_images"
+          CMDLINE="$(cat config/cmdline.txt)"
+
+          devices=("starqltechn" "star2qltechn" "crownqltechn")
+          for dev in "${devices[@]}"; do
+            echo "Packaging boot.img for $dev..."
+            mkbootimg \
+              --kernel linux/arch/arm64/boot/Image \
+              --ramdisk initramfs.cpio.gz \
+              --dtb "linux/arch/arm64/boot/dts/qcom/sdm845-samsung-${dev}.dtb" \
+              --cmdline "$CMDLINE" \
+              --base 0x00000000 \
+              --pagesize 4096 \
+              --ramdisk_offset 0x02000000 \
+              --tags_offset 0x01E00000 \
+              --output "$GITHUB_WORKSPACE/package/boot_images/${dev}-boot.img"
+
+            # Enforce Samsung Knox / SBOOT signature pass
+            echo -n "SEANDROIDENFORCE" >> "$GITHUB_WORKSPACE/package/boot_images/${dev}-boot.img"
+
+            # Package tar for Samsung Odin / Heimdall flashing
+            (cd "$GITHUB_WORKSPACE/package/boot_images" && tar -cf "${dev}-boot.tar" "${dev}-boot.img")
+          done
+
+      - name: Bootstrap Debian ARM64 Rootfs
+        run: |
+          sudo debootstrap --arch=arm64 --foreign --keyring /usr/share/keyrings/debian-archive-keyring.gpg --verbose trixie rootfs https://deb.debian.org/debian
+          sudo mkdir -p rootfs/usr/bin rootfs/proc rootfs/sys rootfs/dev
+          sudo cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
+          sudo mount -t proc proc rootfs/proc
+          sudo mount -t sysfs sysfs rootfs/sys
+          sudo mount --bind /dev rootfs/dev
+          sudo chroot rootfs /usr/bin/qemu-aarch64-static /bin/sh -c 'DEBOOTSTRAP_DIR=/debootstrap exec /debootstrap/debootstrap --second-stage'
+          sudo umount -l rootfs/proc rootfs/sys rootfs/dev || true
+          printf 'nameserver 1.1.1.1\n' | sudo tee rootfs/etc/resolv.conf >/dev/null
+
+      - name: Configure Debian System & Network
+        run: |
+          sudo cp -a rootfs-overlay/. rootfs/
+          sudo chmod +x rootfs/usr/local/sbin/sdm845-usb-gadget-up.sh
+          sudo tee rootfs/tmp/configure-rootfs.sh >/dev/null <<'EOF'
+          #!/bin/bash
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+          printf 'Types: deb\nURIs: https://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main contrib non-free non-free-firmware\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/non-free-firmware.sources
+          apt-get update -qq
+          apt-get install -y -qq alsa-utils bluez curl e2fsprogs firmware-atheros firmware-brcm80211 firmware-qcom-soc \
+            htop iproute2 iw kmod neofetch network-manager openssh-server sudo systemd systemd-sysv wpasupplicant
+          apt-get clean
+          echo sdm845-linux > /etc/hostname
+          printf '127.0.0.1 localhost\n127.0.1.1 sdm845-linux\n' > /etc/hosts
+          printf 'LABEL=debian-root / ext4 defaults 0 1\n' > /etc/fstab
+          echo 'root:root' | chpasswd
+          ssh-keygen -A
+          systemd-machine-id-setup || true
+          systemctl enable ssh NetworkManager sdm845-usb-gadget || true
+          EOF
+          sudo chmod +x rootfs/tmp/configure-rootfs.sh
+          sudo mount -t proc proc rootfs/proc
+          sudo mount -t sysfs sysfs rootfs/sys
+          sudo mount --bind /dev rootfs/dev
+          sudo chroot rootfs /usr/bin/qemu-aarch64-static /bin/bash /tmp/configure-rootfs.sh
+          sudo umount -l rootfs/proc rootfs/sys rootfs/dev || true
+
+      - name: Install Kernel Modules into Rootfs
+        run: |
+          sudo make -C linux ARCH=arm64 LLVM=1 INSTALL_MOD_PATH="$GITHUB_WORKSPACE/rootfs" modules_install
+          sudo rm -f rootfs/lib/modules/"$KVER"/source rootfs/lib/modules/"$KVER"/build
+          sudo rm -f rootfs/usr/bin/qemu-aarch64-static rootfs/etc/resolv.conf rootfs/tmp/configure-rootfs.sh
+
+      - name: Assemble Final Disk Images
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/package/rootfs"
+          sudo truncate -s 4G "$GITHUB_WORKSPACE/package/rootfs/debian-sdm845-rootfs.ext4"
+          sudo mkfs.ext4 -F -L debian-root -d rootfs "$GITHUB_WORKSPACE/package/rootfs/debian-sdm845-rootfs.ext4"
+          sudo tar --numeric-owner -czf "$GITHUB_WORKSPACE/package/rootfs/debian-sdm845-rootfs.tar.gz" -C rootfs .
+          sudo chown -R "$USER:$USER" "$GITHUB_WORKSPACE/package"
+
+      - name: Upload Boot Images Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdm845-boot-images
+          path: package/boot_images/*
+          if-no-files-found: error
+
+      - name: Upload Rootfs Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdm845-debian-rootfs
+          path: package/rootfs/*
+          if-no-files-found: error
