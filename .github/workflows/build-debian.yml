@@ -50,10 +50,9 @@ jobs:
           sed -i '/sdm845-samsung-star2qltechn.dtb/d' linux/arch/arm64/boot/dts/qcom/Makefile
           sed -i '/sdm845-samsung-crownqltechn.dtb/d' linux/arch/arm64/boot/dts/qcom/Makefile
           
-          sed -i '/sdm845-oneplus-fajita.dtb/a \
-dtb-$(CONFIG_ARCH_QCOM)\t+= sdm845-samsung-starqltechn.dtb\n\
-dtb-$(CONFIG_ARCH_QCOM)\t+= sdm845-samsung-star2qltechn.dtb\n\
-dtb-$(CONFIG_ARCH_QCOM)\t+= sdm845-samsung-crownqltechn.dtb' linux/arch/arm64/boot/dts/qcom/Makefile
+          printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-starqltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
+          printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-star2qltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
+          printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-crownqltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
 
       - name: Build Kernel and DTBs
         run: |
