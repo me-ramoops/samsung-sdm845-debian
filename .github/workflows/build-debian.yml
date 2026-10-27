@@ -20,7 +20,7 @@ jobs:
       - name: Install host dependencies
         run: |
           sudo apt-get update -yqq
-          sudo apt-get install -yqq bc bison ca-certificates ccache clang cpio debootstrap debian-archive-keyring \
+          sudo apt-get install -yqq bc bison binfmt-support ca-certificates ccache clang cpio debootstrap debian-archive-keyring \
             e2fsprogs flex gcc-aarch64-linux-gnu git gzip kmod libelf-dev libssl-dev llvm lld make proot \
             qemu-user-static tar zip python3 python3-pip wget curl
 
@@ -94,7 +94,7 @@ jobs:
           devices=("starqltechn" "star2qltechn" "crownqltechn")
           for dev in "${devices[@]}"; do
             echo "Packaging boot.img for $dev..."
-            mkbootimg \
+            python3 "$GITHUB_WORKSPACE/scripts/mkbootimg.py" \
               --kernel linux/arch/arm64/boot/Image \
               --ramdisk initramfs.cpio.gz \
               --dtb "linux/arch/arm64/boot/dts/qcom/sdm845-samsung-${dev}.dtb" \
@@ -141,6 +141,8 @@ jobs:
           printf '127.0.0.1 localhost\n127.0.1.1 sdm845-linux\n' > /etc/hosts
           printf 'LABEL=debian-root / ext4 defaults 0 1\n' > /etc/fstab
           echo 'root:root' | chpasswd
+          id -u debian &>/dev/null || useradd -m -s /bin/bash -G sudo debian
+          echo 'debian:debian' | chpasswd
           ssh-keygen -A
           systemd-machine-id-setup || true
           systemctl enable ssh NetworkManager sdm845-usb-gadget || true
@@ -161,7 +163,7 @@ jobs:
       - name: Assemble Final Disk Images
         run: |
           mkdir -p "$GITHUB_WORKSPACE/package/rootfs"
-          sudo truncate -s 4G "$GITHUB_WORKSPACE/package/rootfs/debian-sdm845-rootfs.ext4"
+          sudo truncate -s 3500M "$GITHUB_WORKSPACE/package/rootfs/debian-sdm845-rootfs.ext4"
           sudo mkfs.ext4 -F -L debian-root -d rootfs "$GITHUB_WORKSPACE/package/rootfs/debian-sdm845-rootfs.ext4"
           sudo tar --numeric-owner -czf "$GITHUB_WORKSPACE/package/rootfs/debian-sdm845-rootfs.tar.gz" -C rootfs .
           sudo chown -R "$USER:$USER" "$GITHUB_WORKSPACE/package"

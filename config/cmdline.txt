@@ -1,1 +1,1 @@
-console=tty0 console=ttyMSM0,115200n8 earlycon=msm_geni_serial,0x00880000 androidboot.hardware=qcom clk_ignore_unused pd_ignore_unused audit=0 rootwait root=/dev/ram0
+console=tty0 console=ttyMSM0,115200n8 earlycon=msm_geni_serial,0x00880000 androidboot.hardware=qcom clk_ignore_unused pd_ignore_unused audit=0 rootwait rdinit=/init

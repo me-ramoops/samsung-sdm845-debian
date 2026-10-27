@@ -46,6 +46,8 @@ setup_gadget() {
     echo "Samsung" > $G/strings/0x409/manufacturer
     echo "0123456789" > $G/strings/0x409/serialnumber
     echo "ncm" > $G/configs/c.1/strings/0x409/configuration
+    echo "42:69:69:69:42:01" > $G/functions/ncm.usb0/host_addr 2>/dev/null || true
+    echo "42:69:69:69:42:02" > $G/functions/ncm.usb0/dev_addr 2>/dev/null || true
     ln -s $G/functions/ncm.usb0 $G/configs/c.1/ 2>/dev/null
     echo "$UDC" > $G/UDC 2>/dev/null || { echo "[initramfs] UDC bind failed"; return 1; }
     
@@ -100,7 +102,7 @@ REASON=""
 mkdir -p /newroot
 if [ -z "$REASON" ]; then
     echo "[initramfs] Attempting to mount rootfs from $ROOT..."
-    MOUT=$(mount -t ext4 "$ROOT" /newroot 2>&1) || REASON="Failed mounting ext4 from $ROOT: $MOUT"
+    MOUT=$(mount "$ROOT" /newroot 2>&1) || REASON="Failed mounting root from $ROOT: $MOUT"
 fi
 
 if [ -z "$REASON" ] && [ ! -x /newroot/usr/lib/systemd/systemd ]; then

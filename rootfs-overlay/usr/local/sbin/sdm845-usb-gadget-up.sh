@@ -22,6 +22,8 @@ if [ ! -d "$G" ]; then
     echo "0123456789" > $G/strings/0x409/serialnumber
     echo "NCM USB Ethernet" > $G/configs/c.1/strings/0x409/configuration
 
+    echo "42:69:69:69:42:01" > $G/functions/ncm.usb0/host_addr 2>/dev/null || true
+    echo "42:69:69:69:42:02" > $G/functions/ncm.usb0/dev_addr 2>/dev/null || true
     ln -sf $G/functions/ncm.usb0 $G/configs/c.1/
     echo "$UDC" > $G/UDC
 fi
