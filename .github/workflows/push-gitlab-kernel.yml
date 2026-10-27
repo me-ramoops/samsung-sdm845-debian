@@ -1,0 +1,60 @@
+name: Sync Full Depth Kernel to GitLab
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH for GitLab
+        env:
+          GITLAB_SSH_KEY: ${{ secrets.GITLAB_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$GITLAB_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+
+      - name: Clone Full Depth Kernel & Apply Samsung Trees
+        run: |
+          git config --global user.name "fwlta"
+          git config --global user.email "monkeyfwlta@protonmail.com"
+
+          echo "Cloning full depth kernel from upstream sdm845-linux-next..."
+          git clone --branch 6.17-wip/starqltechn_latest_patches https://gitlab.com/dsankouski/sdm845-linux-next.git linux
+
+          cd linux
+          
+          # Copy our verified and audited DTS files
+          cp ../config/dts/sdm845-samsung-star-common.dtsi arch/arm64/boot/dts/qcom/
+          cp ../config/dts/sdm845-samsung-starqltechn.dts arch/arm64/boot/dts/qcom/
+          cp ../config/dts/sdm845-samsung-star2qltechn.dts arch/arm64/boot/dts/qcom/
+          cp ../config/dts/sdm845-samsung-crownqltechn.dts arch/arm64/boot/dts/qcom/
+
+          # Update DTS Makefile
+          sed -i '/sdm845-samsung-starqltechn.dtb/d' arch/arm64/boot/dts/qcom/Makefile
+          sed -i '/sdm845-samsung-star2qltechn.dtb/d' arch/arm64/boot/dts/qcom/Makefile
+          sed -i '/sdm845-samsung-crownqltechn.dtb/d' arch/arm64/boot/dts/qcom/Makefile
+          
+          printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-starqltechn.dtb\n' >> arch/arm64/boot/dts/qcom/Makefile
+          printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-star2qltechn.dtb\n' >> arch/arm64/boot/dts/qcom/Makefile
+          printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-crownqltechn.dtb\n' >> arch/arm64/boot/dts/qcom/Makefile
+
+          # Fix upstream compilation bug in rcar-sysc.c
+          sed -i '/GENPD_FLAG_NO_STAY_ON/d' drivers/pmdomain/renesas/rcar-sysc.c || true
+
+          git add arch/arm64/boot/dts/qcom/ drivers/pmdomain/renesas/rcar-sysc.c
+          git commit -m "arm64: dts: qcom: add Samsung Galaxy S9, S9+ and Note 9 mainline support with Wi-Fi PCIe" || true
+
+          # Push with full depth to GitLab vanadium-oss/samsung-sdm845/linux
+          git remote add gitlab git@gitlab.com:vanadium-oss/samsung-sdm845/linux.git
+          git push -f gitlab HEAD:main
+          git push -f gitlab HEAD:sdm845/6.18-wip
