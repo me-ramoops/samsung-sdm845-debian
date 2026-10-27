@@ -56,7 +56,7 @@ jobs:
           git add arch/arm64/boot/dts/qcom/ drivers/pmdomain/renesas/rcar-sysc.c drivers/remoteproc/imx_rproc.c include/linux/pm_domain.h
           git commit -m "arm64: dts: qcom: add Samsung Galaxy S9, S9+ and Note 9 mainline support with Wi-Fi PCIe" || true
 
-          # Push with full depth to GitLab vanadium-oss/samsung-sdm845/linux
-          git remote add gitlab git@gitlab.com:vanadium-oss/samsung-sdm845/linux.git
+          # Push with full depth to GitLab vanadium-oss/samsung-sdm845/Mainline/linux
+          git remote add gitlab git@gitlab.com:vanadium-oss/samsung-sdm845/Mainline/linux.git
           git push -f gitlab HEAD:main
           git push -f gitlab HEAD:sdm845/6.18-wip
