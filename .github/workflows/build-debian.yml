@@ -21,8 +21,8 @@ jobs:
         run: |
           sudo apt-get update -yqq
           sudo apt-get install -yqq bc bison binfmt-support ca-certificates ccache clang cpio debootstrap debian-archive-keyring \
-            e2fsprogs flex gcc-aarch64-linux-gnu git gzip kmod libelf-dev libgnutls28-dev libssl-dev llvm lld make proot \
-            python3-pyelftools qemu-user-static swig tar zip python3 python3-pip wget curl
+            device-tree-compiler e2fsprogs flex gcc-aarch64-linux-gnu git gzip kmod libelf-dev libfdt-dev libgnutls28-dev \
+            libssl-dev llvm lld make proot python3 python3-pip python3-pyelftools python3-setuptools qemu-user-static swig tar zip wget curl
 
 
       - name: Restore ccache
@@ -51,9 +51,10 @@ jobs:
           printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-star2qltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
           printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-crownqltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
 
-          # Fix upstream WIP tree compilation bug for GENPD_FLAG_NO_STAY_ON
-          sed -i '/GENPD_FLAG_NO_SYNC_STATE/a #define GENPD_FLAG_NO_STAY_ON 0' linux/include/linux/pm_domain.h || true
+          # Fix upstream WIP tree compilation bugs
+          sed -i '/GENPD_FLAG_NO_SYNC_STATE/a #define GENPD_FLAG_NO_STAY_ON 0\nstatic inline bool dev_pm_genpd_is_on(struct device *dev) { return true; }' linux/include/linux/pm_domain.h || true
           sed -i '/GENPD_FLAG_NO_STAY_ON/d' linux/drivers/pmdomain/renesas/rcar-sysc.c || true
+          sed -i 's/!dev_pm_genpd_is_on([^)]*)/0/g' linux/drivers/remoteproc/imx_rproc.c || true
 
       - name: Build Kernel and DTBs
         run: |
@@ -169,7 +170,8 @@ jobs:
           printf 'Types: deb\nURIs: https://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main contrib non-free non-free-firmware\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/non-free-firmware.sources
           apt-get update -qq
           apt-get install -y -qq alsa-utils bluez curl e2fsprogs firmware-atheros firmware-brcm80211 firmware-qcom-soc \
-            htop iproute2 iw kmod neofetch network-manager openssh-server sudo systemd systemd-sysv wpasupplicant
+            htop iproute2 iw kmod fastfetch network-manager openssh-server sudo systemd systemd-sysv wpasupplicant
+          ln -sf /usr/bin/fastfetch /usr/local/bin/neofetch || true
           apt-get clean
           echo sdm845-linux > /etc/hostname
           printf '127.0.0.1 localhost\n127.0.1.1 sdm845-linux\n' > /etc/hosts
@@ -185,8 +187,9 @@ jobs:
           sudo mount -t proc proc rootfs/proc
           sudo mount -t sysfs sysfs rootfs/sys
           sudo mount --bind /dev rootfs/dev
+          sudo mount --bind /dev/pts rootfs/dev/pts || true
           sudo chroot rootfs /usr/bin/qemu-aarch64-static /bin/bash /tmp/configure-rootfs.sh
-          sudo umount -l rootfs/proc rootfs/sys rootfs/dev || true
+          sudo umount -l rootfs/dev/pts rootfs/dev rootfs/proc rootfs/sys || true
 
       - name: Install Kernel Modules into Rootfs
         run: |

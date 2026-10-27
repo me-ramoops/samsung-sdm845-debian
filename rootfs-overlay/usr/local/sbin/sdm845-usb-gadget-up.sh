@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
 if [ -z "$UDC" ]; then
@@ -24,10 +23,11 @@ if [ ! -d "$G" ]; then
 
     echo "42:69:69:69:42:01" > $G/functions/ncm.usb0/host_addr 2>/dev/null || true
     echo "42:69:69:69:42:02" > $G/functions/ncm.usb0/dev_addr 2>/dev/null || true
-    ln -sf $G/functions/ncm.usb0 $G/configs/c.1/
-    echo "$UDC" > $G/UDC
+    [ -e "$G/configs/c.1/ncm.usb0" ] || ln -s "$G/functions/ncm.usb0" "$G/configs/c.1/" 2>/dev/null || true
+    echo "$UDC" > $G/UDC 2>/dev/null || true
 fi
 
-ip link set usb0 up || true
+sleep 1
+ip link set usb0 up 2>/dev/null || true
 ip addr add 172.16.42.1/24 dev usb0 2>/dev/null || true
 echo "USB gadget active on 172.16.42.1"
