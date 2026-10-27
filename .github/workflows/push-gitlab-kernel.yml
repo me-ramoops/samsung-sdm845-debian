@@ -48,10 +48,11 @@ jobs:
           printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-star2qltechn.dtb\n' >> arch/arm64/boot/dts/qcom/Makefile
           printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-crownqltechn.dtb\n' >> arch/arm64/boot/dts/qcom/Makefile
 
-          # Fix upstream compilation bug in rcar-sysc.c
+          # Fix upstream compilation bug in pm_domain.h / rcar-sysc.c
+          sed -i '/GENPD_FLAG_NO_SYNC_STATE/a #define GENPD_FLAG_NO_STAY_ON 0' include/linux/pm_domain.h || true
           sed -i '/GENPD_FLAG_NO_STAY_ON/d' drivers/pmdomain/renesas/rcar-sysc.c || true
 
-          git add arch/arm64/boot/dts/qcom/ drivers/pmdomain/renesas/rcar-sysc.c
+          git add arch/arm64/boot/dts/qcom/ drivers/pmdomain/renesas/rcar-sysc.c include/linux/pm_domain.h
           git commit -m "arm64: dts: qcom: add Samsung Galaxy S9, S9+ and Note 9 mainline support with Wi-Fi PCIe" || true
 
           # Push with full depth to GitLab vanadium-oss/samsung-sdm845/linux

@@ -51,7 +51,8 @@ jobs:
           printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-star2qltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
           printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-crownqltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
 
-          # Fix upstream WIP tree compilation bug in rcar-sysc.c
+          # Fix upstream WIP tree compilation bug for GENPD_FLAG_NO_STAY_ON
+          sed -i '/GENPD_FLAG_NO_SYNC_STATE/a #define GENPD_FLAG_NO_STAY_ON 0' linux/include/linux/pm_domain.h || true
           sed -i '/GENPD_FLAG_NO_STAY_ON/d' linux/drivers/pmdomain/renesas/rcar-sysc.c || true
 
       - name: Build Kernel and DTBs
