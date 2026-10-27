@@ -21,8 +21,8 @@ jobs:
         run: |
           sudo apt-get update -yqq
           sudo apt-get install -yqq bc bison binfmt-support ca-certificates ccache clang cpio debootstrap debian-archive-keyring \
-            e2fsprogs flex gcc-aarch64-linux-gnu git gzip kmod libelf-dev libssl-dev llvm lld make proot \
-            qemu-user-static tar zip python3 python3-pip wget curl
+            e2fsprogs flex gcc-aarch64-linux-gnu git gzip kmod libelf-dev libgnutls28-dev libssl-dev llvm lld make proot \
+            python3-pyelftools qemu-user-static swig tar zip python3 python3-pip wget curl
 
 
       - name: Restore ccache
@@ -50,6 +50,9 @@ jobs:
           printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-starqltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
           printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-star2qltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
           printf 'dtb-$(CONFIG_ARCH_QCOM) += sdm845-samsung-crownqltechn.dtb\n' >> linux/arch/arm64/boot/dts/qcom/Makefile
+
+          # Fix upstream WIP tree compilation bug in rcar-sysc.c
+          sed -i '/GENPD_FLAG_NO_STAY_ON/d' linux/drivers/pmdomain/renesas/rcar-sysc.c || true
 
       - name: Build Kernel and DTBs
         run: |
@@ -110,6 +113,36 @@ jobs:
 
             # Package tar for Samsung Odin / Heimdall flashing
             (cd "$GITHUB_WORKSPACE/package/boot_images" && tar -cf "${dev}-boot.tar" "${dev}-boot.img")
+          done
+
+      - name: Build and Package U-Boot Secondary Bootloader
+        run: |
+          git clone --depth 1 https://source.denx.de/u-boot/u-boot.git u-boot
+          cd u-boot
+          make CROSS_COMPILE=aarch64-linux-gnu- qcom_defconfig
+          make CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" u-boot-nodtb.bin
+
+          gzip -9c u-boot-nodtb.bin > u-boot-nodtb.bin.gz
+
+          mkdir -p "$GITHUB_WORKSPACE/package/uboot_images"
+
+          devices=("starqltechn" "star2qltechn" "crownqltechn")
+          for dev in "${devices[@]}"; do
+            echo "Packaging U-Boot boot.img for $dev..."
+            DTB="$GITHUB_WORKSPACE/linux/arch/arm64/boot/dts/qcom/sdm845-samsung-${dev}.dtb"
+            cat u-boot-nodtb.bin.gz "$DTB" > "u-boot-${dev}.gz-dtb"
+
+            python3 "$GITHUB_WORKSPACE/scripts/mkbootimg.py" \
+              --base 0x00000000 \
+              --kernel_offset 0x00008000 \
+              --ramdisk_offset 0x02000000 \
+              --tags_offset 0x01E00000 \
+              --pagesize 4096 \
+              --kernel "u-boot-${dev}.gz-dtb" \
+              --output "$GITHUB_WORKSPACE/package/uboot_images/${dev}-uboot.img"
+
+            echo -n "SEANDROIDENFORCE" >> "$GITHUB_WORKSPACE/package/uboot_images/${dev}-uboot.img"
+            (cd "$GITHUB_WORKSPACE/package/uboot_images" && tar -cf "${dev}-uboot.tar" "${dev}-uboot.img")
           done
 
       - name: Bootstrap Debian ARM64 Rootfs
@@ -173,6 +206,13 @@ jobs:
         with:
           name: sdm845-boot-images
           path: package/boot_images/*
+          if-no-files-found: error
+
+      - name: Upload U-Boot Images Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdm845-uboot-images
+          path: package/uboot_images/*
           if-no-files-found: error
 
       - name: Upload Rootfs Artifacts
