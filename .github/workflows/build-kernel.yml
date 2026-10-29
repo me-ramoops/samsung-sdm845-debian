@@ -56,9 +56,13 @@ jobs:
 
           cp "$GITHUB_WORKSPACE/configs/s9-pmos-wifi.config" .config
           make ARCH=arm64 LLVM=1 olddefconfig
-          make ARCH=arm64 LLVM=1 -j"$(nproc)" Image dtbs
+          make ARCH=arm64 LLVM=1 -j"$(nproc)" Image dtbs modules
 
-          mkdir -p "$GITHUB_WORKSPACE/output"
+          mkdir -p "$GITHUB_WORKSPACE/output/modules"
+          make ARCH=arm64 LLVM=1 INSTALL_MOD_PATH="$GITHUB_WORKSPACE/output/modules" modules_install
+          tar -czf "$GITHUB_WORKSPACE/output/modules.tar.gz" -C "$GITHUB_WORKSPACE/output/modules" lib
+          rm -rf "$GITHUB_WORKSPACE/output/modules"
+
           cp arch/arm64/boot/Image "$GITHUB_WORKSPACE/output/Image"
           cp arch/arm64/boot/dts/qcom/sdm845-samsung-starqltechn.dtb "$GITHUB_WORKSPACE/output/"
           cp arch/arm64/boot/dts/qcom/sdm845-samsung-star2qltechn.dtb "$GITHUB_WORKSPACE/output/"
