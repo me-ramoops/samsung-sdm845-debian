@@ -32,9 +32,18 @@ jobs:
           key: ccache-kernel-7.1-${{ github.run_id }}
           restore-keys: ccache-kernel-7.1-
 
+      - name: Setup SSH for GitLab
+        env:
+          GITLAB_SSH_KEY: ${{ secrets.GITLAB_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$GITLAB_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+
       - name: Clone SDM845 7.1 Kernel Source
         run: |
-          git clone --depth 1 --branch sdm845/7.1-dev https://gitlab.com/vanadium-oss/samsung-sdm845/Mainline/linux.git linux
+          git clone --depth 1 --branch sdm845/7.1-dev git@gitlab.com:vanadium-oss/samsung-sdm845/Mainline/linux.git linux
           cd linux
           echo "Commit: $(git rev-parse HEAD)"
 
