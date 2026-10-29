@@ -1,0 +1,83 @@
+name: Build Kernel 7.1 with BCM4361 Wi-Fi
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-kernel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -yqq
+          sudo apt-get install -yqq bc bison ca-certificates ccache clang cpio device-tree-compiler \
+            flex gcc-aarch64-linux-gnu git gzip kmod libelf-dev libssl-dev llvm lld make python3 u-boot-tools zstd
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-kernel-7.1-${{ github.run_id }}
+          restore-keys: ccache-kernel-7.1-
+
+      - name: Clone SDM845 7.1 Kernel Source
+        run: |
+          git clone --depth 1 --branch sdm845/7.1-dev https://gitlab.com/vanadium-oss/samsung-sdm845/Mainline/linux.git linux
+          cd linux
+          echo "Commit: $(git rev-parse HEAD)"
+
+      - name: Build Kernel Image and DTBs
+        run: |
+          export CC="ccache clang"
+          cd linux
+
+          make ARCH=arm64 LLVM=1 defconfig
+          scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/sdm845.config
+
+          # Enforce built-in Broadcom BCM4361 Wi-Fi PCIe and disable lockdown
+          cat << 'CFG' >> .config
+          CONFIG_BRCMUTIL=y
+          CONFIG_BRCMFMAC=y
+          CONFIG_BRCMFMAC_PROTO_BCDC=y
+          CONFIG_BRCMFMAC_PCIE=y
+          # CONFIG_SECURITY_LOCKDOWN_LSM is not set
+          CFG
+
+          make ARCH=arm64 LLVM=1 olddefconfig
+          make ARCH=arm64 LLVM=1 -j"$(nproc)" Image dtbs modules
+
+          mkdir -p "$GITHUB_WORKSPACE/output/modules"
+          make ARCH=arm64 LLVM=1 INSTALL_MOD_PATH="$GITHUB_WORKSPACE/output/modules" modules_install
+
+          KVER="$(make ARCH=arm64 LLVM=1 -s kernelrelease)"
+          echo "KVER=$KVER" >> "$GITHUB_ENV"
+
+          cp arch/arm64/boot/Image "$GITHUB_WORKSPACE/output/Image"
+          cp arch/arm64/boot/dts/qcom/sdm845-samsung-starqltechn.dtb "$GITHUB_WORKSPACE/output/"
+          cp arch/arm64/boot/dts/qcom/sdm845-samsung-star2qltechn.dtb "$GITHUB_WORKSPACE/output/"
+          cp arch/arm64/boot/dts/qcom/sdm845-samsung-crownqltechn.dtb "$GITHUB_WORKSPACE/output/"
+
+      - name: Package Kernel & Modules Artifacts
+        run: |
+          cd "$GITHUB_WORKSPACE/output"
+          tar -czf modules.tar.gz -C modules .
+          rm -rf modules
+
+      - name: Upload Kernel Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdm845-7.1-kernel-wifi
+          path: output/
+          retention-days: 14
