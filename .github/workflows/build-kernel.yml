@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -65,24 +65,13 @@ jobs:
           CFG
 
           make ARCH=arm64 LLVM=1 olddefconfig
-          make ARCH=arm64 LLVM=1 -j"$(nproc)" Image dtbs modules
+          make ARCH=arm64 LLVM=1 -j"$(nproc)" Image dtbs
 
-          mkdir -p "$GITHUB_WORKSPACE/output/modules"
-          make ARCH=arm64 LLVM=1 INSTALL_MOD_PATH="$GITHUB_WORKSPACE/output/modules" modules_install
-
-          KVER="$(make ARCH=arm64 LLVM=1 -s kernelrelease)"
-          echo "KVER=$KVER" >> "$GITHUB_ENV"
-
+          mkdir -p "$GITHUB_WORKSPACE/output"
           cp arch/arm64/boot/Image "$GITHUB_WORKSPACE/output/Image"
           cp arch/arm64/boot/dts/qcom/sdm845-samsung-starqltechn.dtb "$GITHUB_WORKSPACE/output/"
           cp arch/arm64/boot/dts/qcom/sdm845-samsung-star2qltechn.dtb "$GITHUB_WORKSPACE/output/"
           cp arch/arm64/boot/dts/qcom/sdm845-samsung-crownqltechn.dtb "$GITHUB_WORKSPACE/output/"
-
-      - name: Package Kernel & Modules Artifacts
-        run: |
-          cd "$GITHUB_WORKSPACE/output"
-          tar -czf modules.tar.gz -C modules .
-          rm -rf modules
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
