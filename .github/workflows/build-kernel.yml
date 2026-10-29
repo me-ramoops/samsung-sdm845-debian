@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - '.github/workflows/build-kernel.yml'
+      - 'configs/**'
   workflow_dispatch:
 
 permissions:
@@ -51,6 +52,7 @@ jobs:
         run: |
           export CC="ccache clang"
           cd linux
+          touch .scmversion
 
           cp "$GITHUB_WORKSPACE/configs/s9-pmos-wifi.config" .config
           make ARCH=arm64 LLVM=1 olddefconfig
